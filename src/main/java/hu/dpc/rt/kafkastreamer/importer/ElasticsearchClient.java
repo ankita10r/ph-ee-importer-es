@@ -1,5 +1,7 @@
 package hu.dpc.rt.kafkastreamer.importer;
 
+import io.camunda.zeebe.client.ZeebeClient;
+import io.camunda.zeebe.client.api.worker.JobWorker;
 import io.prometheus.client.Histogram;
 import io.zeebe.exporter.ElasticsearchExporter;
 import io.zeebe.exporter.ElasticsearchExporterException;
@@ -26,9 +28,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
+import com.google.gson.Gson;
 
 import javax.annotation.PostConstruct;
 import java.io.IOException;
@@ -38,8 +40,7 @@ import java.net.URISyntaxException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
-import java.util.Map;
+import java.util.*;
 
 @Component
 public class ElasticsearchClient {
@@ -85,21 +86,64 @@ public class ElasticsearchClient {
         if (metrics == null) {
             metrics = new ElasticsearchMetrics(record.getInt("partitionId"));
         }
-        if(record.has("value")){
-            JSONObject valueObj = record.getJSONObject("value");
-            if(valueObj.has("processInstanceKey")) {
-                Long processId = valueObj.getLong("processInstanceKey");
-                logger.info("Value Obj before :" + valueObj);
-                valueObj.put("processInstanceKey", String.valueOf(processId));
-                logger.info("Value Obj After :" + valueObj);
-                record.put("value", valueObj);
-            }
+        ValueType valueType = ValueType.valueOf(record.getString("valueType"));
+        JSONObject value = record.getJSONObject("value");
+        if (valueType.equals(ValueType.WORKFLOW_INSTANCE) && value.getString("bpmnElementType").contains("Gateway")) { //&& record.getString("value.bpmnElementType") == "Gateway"
+            IndexRequest txnRequest = createTxnIndexReq(record);
+            bulk(txnRequest);
         }
         IndexRequest request =
                 new IndexRequest(indexFor(record), typeFor(record), idFor(record))
                         .source(record.toString(), XContentType.JSON)
                         .routing(Integer.toString(record.getInt("partitionId")));
         bulk(request);
+    }
+
+    private IndexRequest createTxnIndexReq(JSONObject record) {
+        JSONObject value = record.getJSONObject("value");
+        Long processKey = record.getLong("processInstanceKey");
+        final HashSet<String>[] keySet = new HashSet[]{new HashSet<String>()};
+        final Set<Object>[] valueSet = new HashSet[]{new HashSet<Object>()};
+        JSONObject txnRecord = new JSONObject();
+        final ZeebeClient client =ZeebeClient.newClientBuilder()
+                .gatewayAddress("127.0.0.1:26500")
+                .usePlaintext()
+                .build();
+        final JobWorker jobWorker =
+                (JobWorker) client.newWorker()
+                        .jobType("payment-service")
+                        .handler(
+                                (jobClient, job) -> {
+                                    final Map<String, Object> variables = job.getVariablesAsMap();
+                                    keySet[0] = new HashSet<String>(variables.keySet());
+                                    variables.keySet();
+                                    valueSet[0] = new HashSet<Object>(variables.values());
+                                    keySet[0].add("processInstanceKey");
+                                    valueSet[0].add("String");
+                                    keySet[0].add("partitionId");
+                                    valueSet[0].add("Integer");
+                                });
+        Gson gson = new Gson();
+        for(String key : keySet[0]) {
+
+            txnRecord.put(String.valueOf(key), valueSet);
+        }
+        // get ProcessInstanceKey from record
+        //get all variables from zeebe client and add them all to a set add zeebe client loibrary to fetch variables
+        // using ProcessInstanceKey
+        //from the set strip the variables containing the keyword request or response (any variable having the keyword
+        // request or response should be striped"
+        // make a new jsonobject called txnrecord, which will have all the variables from the set, value.processInstanceKey,
+        // valueType, partitionId, position, timestamp and any other value that is common for all indexes
+        // instead of record pass txnrecord in below statemnts
+        // while adding in set, make sure process instance is keyword and amount is number
+        // _id field should be processInstancekey should be outside properties
+        IndexRequest request =
+                new IndexRequest(indexFor(txnRecord), typeFor(txnRecord), idFor(txnRecord))
+                        .source(txnRecord.toString(), XContentType.JSON)
+                        .routing(Integer.toString(txnRecord.getInt("partitionId")));
+
+    return  request;
     }
 
     public synchronized int flush() {
