@@ -1,5 +1,10 @@
 package hu.dpc.rt.kafkastreamer.importer;
 
+import co.elastic.clients.ApiClient;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.json.jackson.JacksonJsonpMapper;
+import co.elastic.clients.transport.ElasticsearchTransport;
+import co.elastic.clients.transport.rest_client.RestClientTransport;
 import io.camunda.zeebe.exporter.ElasticsearchMetrics;
 import io.camunda.zeebe.protocol.record.ValueType;
 import io.camunda.zeebe.util.VersionUtil;
@@ -10,7 +15,6 @@ import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.impl.nio.reactor.IOReactorConfig;
-import org.elasticsearch.action.admin.indices.template.put.PutIndexTemplateRequest;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
@@ -23,9 +27,7 @@ import org.elasticsearch.client.indices.PutComposableIndexTemplateRequest;
 import org.elasticsearch.cluster.metadata.AliasMetadata;
 import org.elasticsearch.cluster.metadata.ComposableIndexTemplate;
 import org.elasticsearch.cluster.metadata.Template;
-import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.compress.CompressedXContent;
-import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.xcontent.XContentType;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -33,7 +35,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 
@@ -46,11 +47,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 @Component
-public class ElasticsearchClient {
+public class ElasticClient {
     public static String INDEX_TEMPLATE_FILENAME_PATTERN = "/zeebe-record-%s-template.json";
     public static String INDEX_DELIMITER = "_";
     public static String ALIAS_DELIMITER = "-";
@@ -93,22 +92,25 @@ public class ElasticsearchClient {
         if (metrics == null) {
             metrics = new ElasticsearchMetrics(record.getInt("partitionId"));
         }
+        IndexRequest request = null;
         if(record.has("value")){
             JSONObject valueObj = record.getJSONObject("value");
-            if(valueObj.has("processInstanceKey")) {
-                Long processId = valueObj.getLong("processInstanceKey");
-                logger.info("Value Obj before :" + valueObj);
-                valueObj.put("processInstanceKey", String.valueOf(processId));
-                logger.info("Value Obj After :" + valueObj);
-                record.put("value", valueObj);
+            if(valueObj.has("name")) {
+                request =
+                        new IndexRequest(indexFor(record), typeFor(record), idFor(record))
+                                .source(record.toString(), XContentType.JSON)
+                                .routing(Integer.toString(record.getInt("partitionId")));
             }
         }
+        else {
 
-        IndexRequest request =
-                new IndexRequest(indexFor(record), typeFor(record), idFor(record))
-                        .source(record.toString(), XContentType.JSON)
-                        .routing(Integer.toString(record.getInt("partitionId")));
+             request =
+                    new IndexRequest(indexFor(record), typeFor(record), idFor(record))
+                            .source(record.toString(), XContentType.JSON)
+                            .routing(Integer.toString(record.getInt("partitionId")));
+        }
         bulk(request);
+        
     }
 
     public synchronized int flush() {
@@ -188,7 +190,7 @@ public class ElasticsearchClient {
         // update alias in template in case it was changed in configuration
         //template.put("aliases", Collections.singletonMap(aliasName, Collections.EMPTY_MAP));
 
-        Template template1 = new Template(null, template,Collections.singletonMap(aliasName, AliasMetadata.newAliasMetadataBuilder(aliasName).build()));
+        Template template1 = new Template(null, template,Collections.singletonMap(aliasName, AliasMetadata.newAliasMetadataBuilder(null).build()));
 
         PutComposableIndexTemplateRequest request = new PutComposableIndexTemplateRequest().name(templateName);
         ComposableIndexTemplate composableIndexTemplate = new ComposableIndexTemplate( Collections.singletonList(templateName + INDEX_DELIMITER + "*"),
@@ -220,8 +222,14 @@ public class ElasticsearchClient {
         // use single thread for rest client
         RestClientBuilder builder =
                 RestClient.builder(httpHost).setHttpClientConfigCallback(this::setHttpClientConfigCallback);
+        // Create the HLRC
+        RestHighLevelClient hlrc = new RestHighLevelClient(builder);
 
-        return new RestHighLevelClient(builder);
+        // Create the new Java Client with the same low level client
+        ElasticsearchTransport transport = new RestClientTransport(hlrc.getLowLevelClient(), new JacksonJsonpMapper());
+        ElasticsearchClient esClient = new ElasticsearchClient(transport);
+
+        return hlrc;
     }
 
     private HttpAsyncClientBuilder setHttpClientConfigCallback(HttpAsyncClientBuilder builder) {
