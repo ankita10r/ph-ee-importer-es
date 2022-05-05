@@ -97,7 +97,7 @@ public class ElasticClient {
             JSONObject valueObj = record.getJSONObject("value");
             if(valueObj.has("name")) {
                 request =
-                        new IndexRequest(indexFor(record), typeFor(record), idFor(record))
+                        new IndexRequest(indexFor(record), idFor(record))
                                 .source(record.toString(), XContentType.JSON)
                                 .routing(Integer.toString(record.getInt("partitionId")));
             }
@@ -105,7 +105,7 @@ public class ElasticClient {
         else {
 
              request =
-                    new IndexRequest(indexFor(record), typeFor(record), idFor(record))
+                    new IndexRequest(indexFor(record), idFor(record))
                             .source(record.toString(), XContentType.JSON)
                             .routing(Integer.toString(record.getInt("partitionId")));
         }
