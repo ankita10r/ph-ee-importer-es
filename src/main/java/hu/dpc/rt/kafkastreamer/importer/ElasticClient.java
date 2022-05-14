@@ -1,10 +1,10 @@
 package hu.dpc.rt.kafkastreamer.importer;
 
-import co.elastic.clients.ApiClient;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.ElasticsearchTransport;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.zeebe.exporter.ElasticsearchMetrics;
 import io.camunda.zeebe.protocol.record.ValueType;
 import io.camunda.zeebe.util.VersionUtil;
@@ -12,6 +12,7 @@ import io.prometheus.client.Histogram;
 import io.camunda.zeebe.exporter.ElasticsearchExporter;
 import io.camunda.zeebe.exporter.ElasticsearchExporterException;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.http.HttpHost;
 import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.impl.nio.reactor.IOReactorConfig;
@@ -24,10 +25,12 @@ import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.indices.PutComposableIndexTemplateRequest;
-import org.elasticsearch.cluster.metadata.AliasMetadata;
 import org.elasticsearch.cluster.metadata.ComposableIndexTemplate;
 import org.elasticsearch.cluster.metadata.Template;
 import org.elasticsearch.common.compress.CompressedXContent;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.xcontent.XContentType;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -39,14 +42,17 @@ import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.Map;
+import java.util.Properties;
+import java.util.stream.Collectors;
 
 @Component
 public class ElasticClient {
@@ -104,13 +110,15 @@ public class ElasticClient {
         }
         else {
 
-             request =
+            request =
                     new IndexRequest(indexFor(record), idFor(record))
                             .source(record.toString(), XContentType.JSON)
                             .routing(Integer.toString(record.getInt("partitionId")));
         }
+        logger.info(request.toString());
         bulk(request);
-        
+
+
     }
 
     public synchronized int flush() {
@@ -169,12 +177,11 @@ public class ElasticClient {
      */
     public boolean putIndexTemplate(
             String templateName, String aliasName, String filename) {
-        CompressedXContent template;
+        Map<String, Object> template;
         try (InputStream inputStream =
                      ElasticsearchExporter.class.getResourceAsStream(filename)) {
             if (inputStream != null) {
-                byte[] bytes = IOUtils.toByteArray(inputStream);
-                template = new CompressedXContent (bytes);
+                template = XContentHelper.convertToMap(XContentType.JSON.xContent(), inputStream, true);
             } else {
                 throw new ElasticsearchExporterException(
                         "Failed to find index template in classpath " + filename);
@@ -185,19 +192,16 @@ public class ElasticClient {
         }
 
         // update prefix in template in case it was changed in configuration
-       // template.put("index_patterns", Collections.singletonList(templateName + INDEX_DELIMITER + "*"));
+        template.put("index_patterns", Collections.singletonList(templateName + INDEX_DELIMITER + "*"));
 
         // update alias in template in case it was changed in configuration
-        //template.put("aliases", Collections.singletonMap(aliasName, Collections.EMPTY_MAP));
-
-        Template template1 = new Template(null, template,Collections.singletonMap(aliasName, AliasMetadata.newAliasMetadataBuilder(aliasName).build()));
+        template.put("aliases", Collections.singletonMap(aliasName, Collections.EMPTY_MAP));
 
         PutComposableIndexTemplateRequest request = new PutComposableIndexTemplateRequest().name(templateName);
-        ComposableIndexTemplate composableIndexTemplate = new ComposableIndexTemplate( Collections.singletonList(templateName + INDEX_DELIMITER + "*"),
-                template1, null, null, null, null);
+        ComposableIndexTemplate composableIndexTemplate = new ComposableIndexTemplate(
+                Collections.singletonList(templateName + INDEX_DELIMITER + "*"), null, null, null, null, null);
         request.indexTemplate(composableIndexTemplate);
         //PutIndexTemplateRequest request = new PutIndexTemplateRequest(templateName).source(template);
-
         return putIndexTemplate(request);
     }
 
@@ -230,6 +234,20 @@ public class ElasticClient {
         ElasticsearchClient esClient = new ElasticsearchClient(transport);
 
         return hlrc;
+    }
+
+    public byte[] convertWithStream(Object o) {
+        ByteArrayOutputStream ba = new ByteArrayOutputStream(1000);
+        ObjectOutputStream oba = null;
+        try {
+            oba = new ObjectOutputStream(ba);
+            oba.writeObject(o);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return ba.toByteArray();
     }
 
     private HttpAsyncClientBuilder setHttpClientConfigCallback(HttpAsyncClientBuilder builder) {
@@ -271,10 +289,6 @@ public class ElasticClient {
 
     protected String idFor(JSONObject record) {
         return record.getInt("partitionId") + "-" + record.getLong("position");
-    }
-
-    protected String typeFor(JSONObject record) {
-        return "_doc";
     }
 
     protected String indexPrefixForValueTypeWithDelimiter(ValueType valueType) {

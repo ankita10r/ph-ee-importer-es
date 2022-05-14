@@ -21,7 +21,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'io.camunda:zeebe-elasticsearch-exporter:1.1.0'
+    implementation 'io.camunda:zeebe-elasticsearch-exporter:1.3.0'
     implementation 'org.elasticsearch.client:elasticsearch-rest-high-level-client:7.16.3'
     implementation 'co.elastic.clients:elasticsearch-java:8.1.0'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.12.3'
@@ -30,6 +30,7 @@ dependencies {
     implementation 'org.springframework.kafka:spring-kafka:2.3.5.RELEASE'
     implementation 'org.json:json:20190722'
     implementation 'commons-io:commons-io:2.11.0'
+    implementation 'com.google.code.gson:gson:2.3.1'
     testImplementation 'junit:junit:4.13'
 }
 
