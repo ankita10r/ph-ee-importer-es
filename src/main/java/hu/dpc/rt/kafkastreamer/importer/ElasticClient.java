@@ -199,7 +199,7 @@ public class ElasticClient {
 
         PutComposableIndexTemplateRequest request = new PutComposableIndexTemplateRequest().name(templateName);
         ComposableIndexTemplate composableIndexTemplate = new ComposableIndexTemplate(
-                Collections.singletonList(templateName + INDEX_DELIMITER + "*"), null, null, null, null, null);
+                Collections.singletonList(templateName + INDEX_DELIMITER + "*"), null, null, 1L, null, null);
         request.indexTemplate(composableIndexTemplate);
         //PutIndexTemplateRequest request = new PutIndexTemplateRequest(templateName).source(template);
         return putIndexTemplate(request);
