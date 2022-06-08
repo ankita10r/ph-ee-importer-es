@@ -14,4 +14,4 @@ logging:
     ROOT: ERROR
 
 reporting:
-  enabled: false
+  enabled: true
