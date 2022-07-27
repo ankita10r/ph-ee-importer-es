@@ -92,6 +92,7 @@ public class ElasticsearchClient {
 
     public void index(JSONObject record) {
         if (metrics == null) {
+            logger.info("I reached here");
             metrics = new ElasticsearchMetrics(record.getInt("partitionId"));
         }
         logger.info("Getting index method called with record value type " + record.getString("valueType"));
