@@ -40,13 +40,13 @@ public class ElasticsearchTemplateSetup {
             createRootIndexTemplate();
 
             if (indexConfiguration.incident) {
-                createValueIndexTemplate(ValueType.INCIDENT);
+                createValueIndexTemplate(ExtendedValueType.INCIDENT);
             }
             if (indexConfiguration.variable) {
-                createValueIndexTemplate(ValueType.VARIABLE);
+                createValueIndexTemplate(ExtendedValueType.VARIABLE);
             }
             if (indexConfiguration.workflowInstance) {
-                createValueIndexTemplate(ValueType.WORKFLOW_INSTANCE);
+                createValueIndexTemplate(ExtendedValueType.WORKFLOW_INSTANCE);
             }
         }
     }
@@ -60,9 +60,9 @@ public class ElasticsearchTemplateSetup {
         }
     }
 
-    private void createValueIndexTemplate(final ValueType valueType) {
-        if (!client.putIndexTemplate(valueType)) {
-            logger.warn("Put index template for value type {} was not acknowledged", valueType);
+    private void createValueIndexTemplate(final ExtendedValueType extendedValueType) {
+        if (!client.putIndexTemplate(extendedValueType)) {
+            logger.warn("Put index template for value type {} was not acknowledged", extendedValueType);
         }
     }
 }

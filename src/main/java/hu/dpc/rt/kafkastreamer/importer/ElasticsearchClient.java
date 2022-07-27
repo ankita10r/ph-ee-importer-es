@@ -195,10 +195,10 @@ public class ElasticsearchClient {
     /**
      * @return true if request was acknowledged
      */
-    public boolean putIndexTemplate(ValueType valueType) {
-        String templateName = indexPrefixForValueType(valueType);
-        String aliasName = aliasNameForValueType(valueType);
-        String filename = indexTemplateForValueType(valueType);
+    public boolean putIndexTemplate(ExtendedValueType extendedValueType) {
+        String templateName = indexPrefixForValueType(extendedValueType);
+        String aliasName = aliasNameForValueType(extendedValueType);
+        String filename = indexTemplateForValueType(extendedValueType);
         return putIndexTemplate(templateName, aliasName, filename);
     }
 
@@ -312,7 +312,7 @@ public class ElasticsearchClient {
 
     protected String indexFor(JSONObject record) {
         Instant timestamp = Instant.ofEpochMilli(record.getLong("timestamp"));
-        return indexPrefixForValueTypeWithDelimiter(ValueType.valueOf(record.getString("valueType"))) + formatter.format(timestamp);
+        return indexPrefixForValueTypeWithDelimiter(ExtendedValueType.valueOf(record.getString("valueType"))) + formatter.format(timestamp);
     }
 
     protected String idFor(JSONObject record) {
@@ -323,15 +323,15 @@ public class ElasticsearchClient {
         return "_doc";
     }
 
-    protected String indexPrefixForValueTypeWithDelimiter(ValueType valueType) {
-        return indexPrefixForValueType(valueType) + INDEX_DELIMITER;
+    protected String indexPrefixForValueTypeWithDelimiter(ExtendedValueType extendedValueType) {
+        return indexPrefixForValueType(extendedValueType) + INDEX_DELIMITER;
     }
 
-    private String aliasNameForValueType(ValueType valueType) {
-        return indexPrefix + ALIAS_DELIMITER + valueTypeToString(valueType);
+    private String aliasNameForValueType(ExtendedValueType extendedValueType) {
+        return indexPrefix + ALIAS_DELIMITER + valueTypeToString(extendedValueType);
     }
 
-    private String indexPrefixForValueType(ValueType valueType) {
+    private String indexPrefixForValueType(ExtendedValueType valueType) {
         String version = VersionUtil.getVersionLowerCase();
 
         return indexPrefix
@@ -341,11 +341,15 @@ public class ElasticsearchClient {
                 + version;
     }
 
-    private static String valueTypeToString(ValueType valueType) {
-        return valueType.name().toLowerCase().replaceAll("_", "-");
+    private static String valueTypeToString(ExtendedValueType extendedValueType) {
+        if(extendedValueType.name().equalsIgnoreCase("process_instance")){
+            extendedValueType = ExtendedValueType.WORKFLOW_INSTANCE;
+        }
+        return extendedValueType.name().toLowerCase().replaceAll("_", "-");
     }
 
-    private static String indexTemplateForValueType(ValueType valueType) {
+
+    private static String indexTemplateForValueType(ExtendedValueType valueType) {
         return String.format(INDEX_TEMPLATE_FILENAME_PATTERN, valueTypeToString(valueType));
     }
 }
